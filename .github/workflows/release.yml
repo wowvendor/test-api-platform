@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  IMAGE_NAME: image
+
+jobs:
+
+  build-caddy:
+    runs-on: [self-hosted]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Log into GitHub Container Registry
+        run: |
+          mkdir -p ~/.docker
+          echo "{\"auths\": {\"registry.digitalocean.com\": {\"auth\": \""${{ secrets.DOCKER_REGISTRY_TOKEN }}"\"},\"HttpHeaders\": {\"User-Agent\": \"Docker-Client/19.03.12\"}}}" > ~/.docker/config.json
+
+      - name: Build image
+        run: |
+          docker build -t ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/caddy:latest -t  ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/caddy:${GITHUB_SHA::8} api --target api_platform_caddy
+
+      - name: Push image to GitHub Container Registry
+        run: |
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/caddy:latest
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/caddy:${GITHUB_SHA::8}
+
+  build-php:
+    runs-on: [ self-hosted ]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Log into GitHub Container Registry
+        run: |
+          mkdir -p ~/.docker
+          echo "{\"auths\": {\"registry.digitalocean.com\": {\"auth\": \""${{ secrets.DOCKER_REGISTRY_TOKEN }}"\"},\"HttpHeaders\": {\"User-Agent\": \"Docker-Client/19.03.12\"}}}" > ~/.docker/config.json
+
+      - name: Build image
+        run: |
+          docker build -t ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/php:latest -t  ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/php:${GITHUB_SHA::8} api --target api_platform_php
+
+      - name: Push image to GitHub Container Registry
+        run: |
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/php:latest
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}bpm-api-platform/php:${GITHUB_SHA::8}
+
+  deploy-prod:
+    needs:
+      - build-php
+      - build-caddy
+    runs-on: [self-hosted]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Устанавливаем Kubectl
+        run: sudo curl -L https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && sudo chmod +x /usr/local/bin/kubectl
+
+      - name: Получаем kubeconfig file
+        run: |
+          mkdir -p $HOME/.kube && touch $HOME/.kube/config
+          echo ${{ secrets.KUBE_CONFIG }} | base64 -d > $HOME/.kube/config
+          export KUBECONFIG=$HOME/.kube/config
+
+      - name: Устанавливаем helm
+        run: sudo curl -L https://get.helm.sh/helm-v3.3.1-linux-amd64.tar.gz | tar xz && sudo mv linux-amd64/helm /bin/helm && sudo rm -rf linux-amd64
+
+      - name: Устанавливаем\обновляем секреты для подключения к репозиторию докера
+        run: |
+          kubectl create -n wowvendor-core secret generic registry-wowvendor \
+          --from-literal=.dockerconfigjson="{\"auths\": {\"registry.digitalocean.com\": {\"auth\": \""${{ secrets.DOCKER_REGISTRY_TOKEN }}"\"}}}" \
+          -o yaml --type=kubernetes.io/dockerconfigjson --dry-run | kubectl apply -f -
+
+      - name: Деплой
+        run: |
+          helm upgrade api-platform-1619711204 helm/api-platform \
+          --namespace=bpm-api-platform \
+          --set secret=aAFGnlkvas \
+          --set-string pwa.image.tag=${GITHUB_SHA::8} \
+          --set-string caddy.image.tag=${GITHUB_SHA::8} \
+          --set-string php.image.tag=${GITHUB_SHA::8} \
+          --set-string mysql.Username=${{ secrets.DB_USERNAME }} \
+          --set-string mysql.Password=${{ secrets.DB_PASSWORD }} \
+          --kubeconfig=$HOME/.kube/config \
+          --wait
+
