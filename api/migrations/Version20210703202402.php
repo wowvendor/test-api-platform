@@ -36,7 +36,6 @@ final class Version20210703202402 extends AbstractMigration
         $this->addSql('CREATE TABLE faction (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name VARCHAR(255) NOT NULL)');
         $this->addSql('CREATE TABLE game (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name VARCHAR(255) NOT NULL, slug VARCHAR(255) NOT NULL)');
         $this->addSql('CREATE TABLE region (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name VARCHAR(255) NOT NULL)');
-        $this->addSql('INSERT INTO game (id, name, slug) VALUES (1, "Mock game",)');
     }
 
     public function down(Schema $schema) : void
